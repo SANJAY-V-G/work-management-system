@@ -20,5 +20,7 @@ class WorkLog(Base):
     login_time = Column(DateTime, default=datetime.datetime.utcnow)
     logout_time = Column(DateTime, nullable=True)
     duration_minutes = Column(Integer, nullable=True)
+    pop_description = Column(String, nullable=True)
+    push_command = Column(String, nullable=True)
 
     user = relationship("User", back_populates="work_logs")

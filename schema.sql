@@ -10,5 +10,7 @@ CREATE TABLE work_logs (
     login_time DATETIME,
     logout_time DATETIME,
     duration_minutes INTEGER,
+    pop_description VARCHAR,
+    push_command VARCHAR,
     FOREIGN KEY(user_id) REFERENCES users(id)
 );

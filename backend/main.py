@@ -88,7 +88,7 @@ def start_work(db: Session = Depends(get_db), current_user: models.User = Depend
     return new_log
 
 @app.post("/work/stop", response_model=schemas.WorkLogOut)
-def stop_work(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+def stop_work(log_data: schemas.WorkLogStop, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     # Find active session
     active_session = db.query(models.WorkLog).filter(
         models.WorkLog.user_id == current_user.id,
@@ -108,6 +108,8 @@ def stop_work(db: Session = Depends(get_db), current_user: models.User = Depends
     
     active_session.logout_time = logout_time
     active_session.duration_minutes = int(duration)
+    active_session.pop_description = log_data.pop_description
+    active_session.push_command = log_data.push_command
     
     db.commit()
     db.refresh(active_session)

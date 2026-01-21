@@ -20,11 +20,17 @@ class TokenData(BaseModel):
 class WorkLogBase(BaseModel):
     pass
 
+class WorkLogStop(BaseModel):
+    pop_description: str
+    push_command: str
+
 class WorkLogOut(BaseModel):
     id: int
     login_time: datetime
     logout_time: Optional[datetime]
     duration_minutes: Optional[int]
+    pop_description: Optional[str]
+    push_command: Optional[str]
     
     class Config:
         orm_mode = True

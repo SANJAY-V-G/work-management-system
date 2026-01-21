@@ -31,8 +31,8 @@ export const startWork = () => {
     return api.post('/work/start');
 };
 
-export const stopWork = () => {
-    return api.post('/work/stop');
+export const stopWork = (data) => {
+    return api.post('/work/stop', data);
 };
 
 export const getWorkLogs = () => {

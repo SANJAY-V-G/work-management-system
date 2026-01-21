@@ -8,6 +8,9 @@ const Dashboard = ({ token, handleLogout }) => {
     const [logs, setLogs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [startTime, setStartTime] = useState(null);
+    const [showModal, setShowModal] = useState(false);
+    const [popDescription, setPopDescription] = useState('');
+    const [pushCommand, setPushCommand] = useState('');
 
     useEffect(() => {
         const fetchData = async () => {
@@ -54,11 +57,24 @@ const Dashboard = ({ token, handleLogout }) => {
         }
     };
 
-    const handleStopWork = async () => {
+    const openStopModal = () => {
+        setPopDescription('');
+        setPushCommand('');
+        setShowModal(true);
+    };
+
+    const handleConfirmStop = async () => {
+        const wordCount = popDescription.trim().split(/\s+/).length;
+        if (wordCount > 100) {
+            alert(`Description is too long (${wordCount} words). Limit is 100 words.`);
+            return;
+        }
+        
         try {
-            await stopWork();
+            await stopWork({ pop_description: popDescription, push_command: pushCommand });
             setStatus('inactive');
             setStartTime(null);
+            setShowModal(false);
             await fetchLogs();
         } catch (error) {
             alert(error.response?.data?.detail || "Error stopping work");
@@ -126,7 +142,7 @@ const Dashboard = ({ token, handleLogout }) => {
                                 </button>
                             ) : (
                                 <button
-                                    onClick={handleStopWork}
+                                    onClick={openStopModal}
                                     className="w-full md:w-auto bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-bold py-3 px-10 rounded-full text-lg shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1"
                                 >
                                     Stop Work
@@ -209,6 +225,51 @@ const Dashboard = ({ token, handleLogout }) => {
                     </div>
                 </div>
             </div>
+
+            {showModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+                    <div className="bg-white rounded-lg p-8 w-full max-w-md">
+                        <h2 className="text-2xl font-bold mb-4">End Session Details</h2>
+                        <div className="mb-4">
+                            <label className="block text-gray-700 text-sm font-bold mb-2">
+                                Pop Description (Max 100 words)
+                            </label>
+                            <textarea
+                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline h-32"
+                                value={popDescription}
+                                onChange={(e) => setPopDescription(e.target.value)}
+                            />
+                        </div>
+                        <div className="mb-6">
+                            <label className="block text-gray-700 text-sm font-bold mb-2">
+                                Push Command
+                            </label>
+                            <input
+                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                type="text"
+                                value={pushCommand}
+                                onChange={(e) => setPushCommand(e.target.value)}
+                            />
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <button
+                                className="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
+                                type="button"
+                                onClick={() => setShowModal(false)}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
+                                type="button"
+                                onClick={handleConfirmStop}
+                            >
+                                Confirm & Stop
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
