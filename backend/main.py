@@ -3,13 +3,31 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 import models, schemas, auth, database
-from database import engine, get_db
+from database import engine, get_db, SessionLocal
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Work Hours Tracking System")
+
+@app.on_event("startup")
+def startup_event():
+    # Ensure admin user exists
+    db = SessionLocal()
+    try:
+        user = db.query(models.User).filter(models.User.username == "admin").first()
+        if not user:
+            print("Creating admin user...")
+            hashed_pwd = auth.get_password_hash("1234")
+            admin_user = models.User(username="admin", password_hash=hashed_pwd)
+            db.add(admin_user)
+            db.commit()
+            print("Admin user created successfully.")
+    except Exception as e:
+        print(f"Error creating admin user on startup: {e}")
+    finally:
+        db.close()
 
 # CORS setup for frontend
 app.add_middleware(
