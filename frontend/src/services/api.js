@@ -43,6 +43,14 @@ export const getWorkStatus = () => {
     return api.get('/work/status');
 };
 
+export const getAllUsers = () => {
+    return api.get('/admin/users');
+};
+
+export const getAllWorkLogs = () => {
+    return api.get('/admin/logs');
+};
+
 export const getMe = () => {
     return api.get('/me');
 };

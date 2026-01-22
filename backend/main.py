@@ -139,3 +139,25 @@ def get_work_status(db: Session = Depends(get_db), current_user: models.User = D
             start_time = start_time.replace(tzinfo=timezone.utc)
         return {"status": "active", "start_time": start_time}
     return {"status": "inactive"}
+
+@app.get("/admin/users", response_model=list[schemas.UserOut])
+def get_all_users(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    if current_user.username != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized")
+    return db.query(models.User).all()
+
+@app.get("/admin/logs", response_model=list[schemas.WorkLogAdminOut])
+def get_all_logs(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    if current_user.username != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    logs = db.query(models.WorkLog).join(models.User).order_by(models.WorkLog.login_time.desc()).all()
+    
+    # Timezone fix
+    for log in logs:
+        if log.login_time and log.login_time.tzinfo is None:
+            log.login_time = log.login_time.replace(tzinfo=timezone.utc)
+        if log.logout_time and log.logout_time.tzinfo is None:
+            log.logout_time = log.logout_time.replace(tzinfo=timezone.utc)
+            
+    return logs

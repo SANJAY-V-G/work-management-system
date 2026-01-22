@@ -41,3 +41,9 @@ class UserOut(BaseModel):
     
     class Config:
         orm_mode = True
+
+class WorkLogAdminOut(WorkLogOut):
+    user: UserOut
+
+    class Config:
+        orm_mode = True

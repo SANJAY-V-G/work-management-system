@@ -16,7 +16,9 @@ const DownloadCSV = ({ logs, username }) => {
             const popDesc = log.pop_description ? `"${log.pop_description.replace(/"/g, '""')}"` : '';
             const pushCmd = log.push_command ? `"${log.push_command.replace(/"/g, '""')}"` : '';
             
-            line += `${loginDate},${loginTime},${logoutTime},${duration},${popDesc},${pushCmd},${username},`;
+            const user = log.user ? log.user.username : username;
+            
+            line += `${loginDate},${loginTime},${logoutTime},${duration},${popDesc},${pushCmd},${user},`;
 
             str += line + '\r\n';
         }
@@ -28,7 +30,8 @@ const DownloadCSV = ({ logs, username }) => {
         const csvURL = URL.createObjectURL(csvData);
         const link = document.createElement('a');
         link.href = csvURL;
-        link.download = `work_report_${username}.csv`;
+        const filename = username === 'Admin' ? 'all_users_work_report.csv' : `work_report_${username}.csv`;
+        link.download = filename;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
