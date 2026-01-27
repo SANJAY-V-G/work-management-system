@@ -1,12 +1,10 @@
 fastapi
 uvicorn
-sqlalchemy
 pydantic
 passlib
 bcrypt==3.2.2
 python-jose[cryptography]
 python-multipart
 httpx
-psycopg2-binary
 firebase-admin
 python-dotenv
