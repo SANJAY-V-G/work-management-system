@@ -1,19 +1,16 @@
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 import asyncio
 import httpx
-
 import os
 
-import models, schemas, auth, database
-from database import engine, get_db, SessionLocal
+import schemas, auth
+from firebase_config import db
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
-
-# Create tables
-models.Base.metadata.create_all(bind=engine)
+from google.cloud.firestore_v1.base_query import FieldFilter
+from firebase_admin import firestore
 
 app = FastAPI(title="Work Hours Tracking System")
 
@@ -28,7 +25,7 @@ async def keep_server_awake():
 
     BASE_URL = os.getenv("BASE_URL")
     if not BASE_URL:
-        print("⚠️ BASE_URL not set. Keep-alive disabled.")
+        # print("⚠️ BASE_URL not set. Keep-alive disabled.")
         return
 
     async with httpx.AsyncClient(timeout=10) as client:
@@ -48,20 +45,22 @@ async def keep_server_awake():
 @app.on_event("startup")
 async def startup_event():
     # Ensure admin user exists
-    db = SessionLocal()
     try:
-        user = db.query(models.User).filter(models.User.username == "admin").first()
-        if not user:
+        users_ref = db.collection('users')
+        query = users_ref.where(filter=FieldFilter('username', '==', 'admin')).limit(1).stream()
+        admin_exists = any(query)
+        
+        if not admin_exists:
             print("Creating admin user...")
             hashed_pwd = auth.get_password_hash("1234")
-            admin_user = models.User(username="admin", password_hash=hashed_pwd)
-            db.add(admin_user)
-            db.commit()
+            # Create admin user
+            users_ref.add({
+                'username': 'admin',
+                'password_hash': hashed_pwd
+            })
             print("Admin user created successfully.")
     except Exception as e:
         print(f"Error creating admin user on startup: {e}")
-    finally:
-        db.close()
 
     # 🔥 Start keep-alive task
     asyncio.create_task(keep_server_awake())
@@ -83,10 +82,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 # ==============================
 # 🔐 AUTH HELPERS
 # ==============================
-async def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_db)
-):
+async def get_current_user(token: str = Depends(oauth2_scheme)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -101,11 +97,21 @@ async def get_current_user(
     except JWTError:
         raise credentials_exception
 
-    user = db.query(models.User).filter(models.User.username == username).first()
-    if user is None:
+    # Fetch user from Firestore
+    users_ref = db.collection('users')
+    query = users_ref.where(filter=FieldFilter('username', '==', username)).limit(1).stream()
+    
+    user_doc = None
+    for doc in query:
+        user_doc = doc
+        break
+        
+    if user_doc is None:
         raise credentials_exception
 
-    return user
+    user_data = user_doc.to_dict()
+    user_data['id'] = user_doc.id
+    return user_data
 
 
 # ==============================
@@ -123,36 +129,57 @@ def health_check():
 # 👤 AUTH ROUTES
 # ==============================
 @app.post("/register", response_model=schemas.UserOut)
-def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    if db.query(models.User).filter(models.User.username == user.username).first():
+def register(user: schemas.UserCreate):
+    users_ref = db.collection('users')
+    
+    # Check if username exists
+    query = users_ref.where(filter=FieldFilter('username', '==', user.username)).limit(1).stream()
+    if any(query):
         raise HTTPException(status_code=400, detail="Username already registered")
 
     hashed_password = auth.get_password_hash(user.password)
-    new_user = models.User(username=user.username, password_hash=hashed_password)
-
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    return new_user
+    new_user_data = {
+        'username': user.username,
+        'password_hash': hashed_password
+    }
+    
+    update_time, doc_ref = users_ref.add(new_user_data)
+    
+    return {**new_user_data, "id": doc_ref.id}
 
 
 @app.post("/login", response_model=schemas.Token)
-def login(form_data: schemas.UserLogin, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.username == form_data.username).first()
+def login(form_data: schemas.UserLogin):
+    users_ref = db.collection('users')
+    query = users_ref.where(filter=FieldFilter('username', '==', form_data.username)).limit(1).stream()
+    
+    user_doc = None
+    for doc in query:
+        user_doc = doc
+        break
 
-    if not user or not auth.verify_password(form_data.password, user.password_hash):
+    if not user_doc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    user_data = user_doc.to_dict()
+
+    if not auth.verify_password(form_data.password, user_data['password_hash']):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    access_token = auth.create_access_token(data={"sub": user.username})
+    access_token = auth.create_access_token(data={"sub": user_data['username']})
     return {"access_token": access_token, "token_type": "bearer"}
 
 
 @app.get("/me", response_model=schemas.UserOut)
-def read_users_me(current_user: models.User = Depends(get_current_user)):
+def read_users_me(current_user: dict = Depends(get_current_user)):
     return current_user
 
 
@@ -160,92 +187,102 @@ def read_users_me(current_user: models.User = Depends(get_current_user)):
 # 🕒 WORK TRACKING
 # ==============================
 @app.post("/work/start", response_model=schemas.WorkLogOut)
-def start_work(
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user)
-):
-    open_session = db.query(models.WorkLog).filter(
-        models.WorkLog.user_id == current_user.id,
-        models.WorkLog.logout_time == None
-    ).first()
-
-    if open_session:
+def start_work(current_user: dict = Depends(get_current_user)):
+    logs_ref = db.collection('work_logs')
+    
+    # Check for open session
+    # Note: Firestore query for None/Null: where('logout_time', '==', None)
+    query = logs_ref.where(filter=FieldFilter('user_id', '==', current_user['id'])).where(filter=FieldFilter('logout_time', '==', None)).limit(1).stream()
+    
+    if any(query):
         raise HTTPException(status_code=400, detail="You already have an active session.")
 
-    new_log = models.WorkLog(
-        user_id=current_user.id,
-        login_time=datetime.now(timezone.utc)
-    )
+    new_log_data = {
+        'user_id': current_user['id'],
+        'login_time': datetime.now(timezone.utc),
+        'logout_time': None,
+        'duration_minutes': None,
+        'pop_description': None,
+        'push_command': None
+    }
 
-    db.add(new_log)
-    db.commit()
-    db.refresh(new_log)
-    return new_log
+    update_time, doc_ref = logs_ref.add(new_log_data)
+    
+    return {**new_log_data, "id": doc_ref.id}
 
 
 @app.post("/work/stop", response_model=schemas.WorkLogOut)
 def stop_work(
     log_data: schemas.WorkLogStop,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user)
 ):
-    active_session = db.query(models.WorkLog).filter(
-        models.WorkLog.user_id == current_user.id,
-        models.WorkLog.logout_time == None
-    ).first()
+    logs_ref = db.collection('work_logs')
+    
+    # Find active session
+    query = logs_ref.where(filter=FieldFilter('user_id', '==', current_user['id'])).where(filter=FieldFilter('logout_time', '==', None)).limit(1).stream()
+    
+    active_doc = None
+    for doc in query:
+        active_doc = doc
+        break
 
-    if not active_session:
+    if not active_doc:
         raise HTTPException(status_code=400, detail="No active work session found.")
 
-    login_time = active_session.login_time
+    active_data = active_doc.to_dict()
+    
+    login_time = active_data['login_time']
+    # Firestore timestamps come back as datetime objects with timezone info usually
     if login_time.tzinfo is None:
         login_time = login_time.replace(tzinfo=timezone.utc)
 
     logout_time = datetime.now(timezone.utc)
     duration = int((logout_time - login_time).total_seconds() / 60)
 
-    active_session.logout_time = logout_time
-    active_session.duration_minutes = duration
-    active_session.pop_description = log_data.pop_description
-    active_session.push_command = log_data.push_command
-
-    db.commit()
-    db.refresh(active_session)
-    return active_session
+    update_data = {
+        'logout_time': logout_time,
+        'duration_minutes': duration,
+        'pop_description': log_data.pop_description,
+        'push_command': log_data.push_command
+    }
+    
+    # Update Firestore
+    active_doc.reference.update(update_data)
+    
+    # Merge for response
+    return {**active_data, **update_data, "id": active_doc.id}
 
 
 @app.get("/work/logs", response_model=list[schemas.WorkLogOut])
-def get_work_logs(
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user)
-):
-    logs = db.query(models.WorkLog).filter(
-        models.WorkLog.user_id == current_user.id
-    ).order_by(models.WorkLog.login_time.desc()).all()
+def get_work_logs(current_user: dict = Depends(get_current_user)):
+    logs_ref = db.collection('work_logs')
+    
+    # Query logs for user
+    query = logs_ref.where(filter=FieldFilter('user_id', '==', current_user['id'])).order_by('login_time', direction=firestore.Query.DESCENDING).stream()
+    
+    results = []
+    for doc in query:
+        data = doc.to_dict()
+        data['id'] = doc.id
+        results.append(data)
 
-    for log in logs:
-        if log.login_time and log.login_time.tzinfo is None:
-            log.login_time = log.login_time.replace(tzinfo=timezone.utc)
-        if log.logout_time and log.logout_time.tzinfo is None:
-            log.logout_time = log.logout_time.replace(tzinfo=timezone.utc)
-
-    return logs
+    return results
 
 
 @app.get("/work/status")
-def get_work_status(
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user)
-):
-    active_session = db.query(models.WorkLog).filter(
-        models.WorkLog.user_id == current_user.id,
-        models.WorkLog.logout_time == None
-    ).first()
+def get_work_status(current_user: dict = Depends(get_current_user)):
+    logs_ref = db.collection('work_logs')
+    
+    query = logs_ref.where(filter=FieldFilter('user_id', '==', current_user['id'])).where(filter=FieldFilter('logout_time', '==', None)).limit(1).stream()
+    
+    active_doc = None
+    for doc in query:
+        active_doc = doc
+        break
 
-    if active_session:
-        start_time = active_session.login_time
-        if start_time.tzinfo is None:
-            start_time = start_time.replace(tzinfo=timezone.utc)
+    if active_doc:
+        data = active_doc.to_dict()
+        start_time = data['login_time']
         return {"status": "active", "start_time": start_time}
 
     return {"status": "inactive"}
@@ -255,32 +292,52 @@ def get_work_status(
 # 🛠️ ADMIN ROUTES
 # ==============================
 @app.get("/admin/users", response_model=list[schemas.UserOut])
-def get_all_users(
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user)
-):
-    if current_user.username != "admin":
+def get_all_users(current_user: dict = Depends(get_current_user)):
+    if current_user['username'] != "admin":
         raise HTTPException(status_code=403, detail="Not authorized")
 
-    return db.query(models.User).all()
+    users_ref = db.collection('users')
+    docs = users_ref.stream()
+    
+    results = []
+    for doc in docs:
+        data = doc.to_dict()
+        data['id'] = doc.id
+        results.append(data)
+        
+    return results
 
 
 @app.get("/admin/logs", response_model=list[schemas.WorkLogAdminOut])
-def get_all_logs(
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user)
-):
-    if current_user.username != "admin":
+def get_all_logs(current_user: dict = Depends(get_current_user)):
+    if current_user['username'] != "admin":
         raise HTTPException(status_code=403, detail="Not authorized")
 
-    logs = db.query(models.WorkLog).join(models.User).order_by(
-        models.WorkLog.login_time.desc()
-    ).all()
+    # Fetch all users first to join manually
+    users_ref = db.collection('users')
+    user_docs = users_ref.stream()
+    users_map = {}
+    for doc in user_docs:
+        u_data = doc.to_dict()
+        u_data['id'] = doc.id
+        users_map[doc.id] = u_data
 
-    for log in logs:
-        if log.login_time and log.login_time.tzinfo is None:
-            log.login_time = log.login_time.replace(tzinfo=timezone.utc)
-        if log.logout_time and log.logout_time.tzinfo is None:
-            log.logout_time = log.logout_time.replace(tzinfo=timezone.utc)
+    # Fetch all logs
+    logs_ref = db.collection('work_logs')
+    log_docs = logs_ref.order_by('login_time', direction=firestore.Query.DESCENDING).stream()
+    
+    results = []
+    for doc in log_docs:
+        data = doc.to_dict()
+        data['id'] = doc.id
+        
+        # Attach user
+        user_id = data.get('user_id')
+        user_obj = users_map.get(user_id)
+        
+        # Only include if user exists (integrity check)
+        if user_obj:
+            data['user'] = user_obj
+            results.append(data)
 
-    return logs
+    return results

@@ -25,7 +25,7 @@ class WorkLogStop(BaseModel):
     push_command: str
 
 class WorkLogOut(BaseModel):
-    id: int
+    id: str
     login_time: datetime
     logout_time: Optional[datetime]
     duration_minutes: Optional[int]
@@ -36,7 +36,7 @@ class WorkLogOut(BaseModel):
         orm_mode = True
 
 class UserOut(BaseModel):
-    id: int
+    id: str
     username: str
     
     class Config:
