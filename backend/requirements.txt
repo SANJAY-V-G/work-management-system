@@ -9,3 +9,4 @@ python-multipart
 httpx
 psycopg2-binary
 firebase-admin
+python-dotenv
