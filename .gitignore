@@ -17,3 +17,4 @@ dist/
 # IDEs
 .vscode/
 .idea/
+backend/serviceAccountKey.json
