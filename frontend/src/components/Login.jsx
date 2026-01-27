@@ -7,10 +7,12 @@ const Login = ({ setToken, setUser }) => {
     const [showPassword, setShowPassword] = useState(false);
     const [isRegistering, setIsRegistering] = useState(false);
     const [error, setError] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
+        setIsLoading(true);
         try {
             if (isRegistering) {
                 await registerUser(username, password);
@@ -24,6 +26,8 @@ const Login = ({ setToken, setUser }) => {
             }
         } catch (err) {
             setError(err.response?.data?.detail || 'An error occurred');
+        } finally {
+            setIsLoading(false);
         }
     };
 
@@ -75,9 +79,20 @@ const Login = ({ setToken, setUser }) => {
                     </div>
                     <button
                         type="submit"
-                        className="w-full bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-bold py-3 px-4 rounded-lg focus:outline-none focus:shadow-outline transform transition hover:-translate-y-1 duration-200 shadow-lg"
+                        disabled={isLoading}
+                        className={`w-full bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-bold py-3 px-4 rounded-lg focus:outline-none focus:shadow-outline transform transition hover:-translate-y-1 duration-200 shadow-lg flex items-center justify-center ${isLoading ? 'opacity-70 cursor-not-allowed' : ''}`}
                     >
-                        {isRegistering ? 'Sign Up' : 'Sign In'}
+                        {isLoading ? (
+                            <>
+                                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                {isRegistering ? 'Signing Up...' : 'Signing In...'}
+                            </>
+                        ) : (
+                            isRegistering ? 'Sign Up' : 'Sign In'
+                        )}
                     </button>
                     <div className="mt-6 text-center">
                         <button
