@@ -2,12 +2,28 @@ import React, { useState, useEffect } from 'react';
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
 import AdminDashboard from './components/AdminDashboard';
-import { getMe } from './services/api';
+import { getMe, pingServer } from './services/api';
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  // Keep server awake
+  useEffect(() => {
+    const ping = () => {
+      pingServer()
+        .then(() => console.log('Server pinged to keep awake'))
+        .catch(err => console.error('Ping failed', err));
+    };
+    
+    // Ping immediately on load
+    ping();
+
+    // Ping every 5 minutes
+    const interval = setInterval(ping, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     if (token) {

@@ -54,3 +54,7 @@ export const getAllWorkLogs = () => {
 export const getMe = () => {
     return api.get('/me');
 };
+
+export const pingServer = () => {
+    return api.get('/health');
+};

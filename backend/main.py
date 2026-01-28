@@ -25,14 +25,15 @@ async def keep_server_awake():
 
     BASE_URL = os.getenv("BASE_URL")
     if not BASE_URL:
-        # print("⚠️ BASE_URL not set. Keep-alive disabled.")
+        print("⚠️ BASE_URL environment variable is not set. Internal keep-alive ping is disabled.")
+        print("   To enable self-ping, set BASE_URL to your Render app URL (e.g., https://my-app.onrender.com)")
         return
 
     async with httpx.AsyncClient(timeout=10) as client:
         while True:
             try:
                 response = await client.get(f"{BASE_URL}/health")
-                print(f"🔁 Keep-alive ping: {response.status_code}")
+                print(f"🔁 Keep-alive ping to {BASE_URL}: {response.status_code}")
             except Exception as e:
                 print(f"❌ Keep-alive ping failed: {e}")
 
